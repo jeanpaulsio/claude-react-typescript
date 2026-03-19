@@ -922,9 +922,314 @@ function EditProfileForm() {
 
 ---
 
+## Vike Patterns
+
+> [Vike](https://vike.dev) is a flexible Vite-based framework with per-page rendering control (SSR, SPA, SSG), filesystem routing, and a hook-based architecture. Use `vike-react` for React integration.
+
+### File Structure
+
+```
+pages/
+├── +config.ts                     # Global config (extends vike-react)
+├── +Layout.tsx                    # Root layout (wraps all pages)
+├── +Wrapper.tsx                   # Provider wrapper (store, query client)
+├── +Head.tsx                      # Global <head> tags (favicon, fonts)
+├── +onCreatePageContext.server.ts # Add user/auth to pageContext
+├── _error/
+│   └── +Page.tsx                  # Error page (404, 500, custom)
+├── index/
+│   ├── +Page.tsx                  # URL: /
+│   └── +data.ts                   # Data for home page
+├── (marketing)/                   # Route group (no URL segment)
+│   ├── +Layout.tsx                # Layout for marketing pages only
+│   ├── about/+Page.tsx            # URL: /about
+│   └── pricing/+Page.tsx          # URL: /pricing
+├── dashboard/
+│   ├── +guard.ts                  # Auth check (runs before +data)
+│   ├── +Page.tsx                  # URL: /dashboard
+│   └── +data.ts                   # Server-side data fetching
+└── users/
+    └── @id/                       # Parameterized route
+        ├── +Page.tsx              # URL: /users/123
+        └── +data.ts
+```
+
+**Key conventions:**
+- `pages/`, `index/`, `src/`, `(group)/` are ignored in URLs
+- `@param` for dynamic route segments (accessed via `pageContext.routeParams`)
+- `(group)` for organizing pages with shared config/layout without affecting URLs
+
+### Global Config
+
+```tsx
+// pages/+config.ts
+import vikeReact from 'vike-react/config'
+
+export default {
+  extends: [vikeReact],
+  title: 'My App',
+  description: 'Built with Vike + React',
+  ssr: true, // Default: SSR enabled. Set false for SPA pages.
+}
+```
+
+### Pages and Data Fetching
+
+`+data()` runs on the server by default — safe to use ORM, SQL, secrets:
+
+```tsx
+// pages/users/@id/+data.ts
+import { render } from 'vike/abort'
+import type { PageContextServer } from 'vike/types'
+
+export type Data = Awaited<ReturnType<typeof data>>
+
+export async function data(pageContext: PageContextServer) {
+  const user = await db.user.findUnique({ where: { id: pageContext.routeParams.id } })
+
+  if (!user) {
+    throw render(404, `User ${pageContext.routeParams.id} not found`)
+  }
+
+  // Only send what the client needs — minimize payload
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+  }
+}
+```
+
+```tsx
+// pages/users/@id/+Page.tsx
+import { useData } from 'vike-react/useData'
+import type { Data } from './+data'
+
+export default function Page() {
+  const { name, email } = useData<Data>()
+
+  return (
+    <div>
+      <h1>{name}</h1>
+      <p>{email}</p>
+    </div>
+  )
+}
+```
+
+### Route Guards (Auth Protection)
+
+`+guard()` runs before `+data()` — prevents unauthorized data fetching:
+
+```tsx
+// pages/dashboard/+guard.server.ts
+import { render, redirect } from 'vike/abort'
+import type { PageContextServer } from 'vike/types'
+
+export async function guard(pageContext: PageContextServer) {
+  if (!pageContext.user) {
+    throw redirect('/login')
+  }
+  if (!pageContext.user.isAdmin) {
+    throw render(403, 'Admin access required')
+  }
+}
+```
+
+### Layouts and Wrappers
+
+**`+Layout`** — visual page structure (cumulative, nests with parent layouts):
+
+```tsx
+// pages/+Layout.tsx
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <Navigation />
+      <main>{children}</main>
+      <Footer />
+    </>
+  )
+}
+```
+
+**`+Wrapper`** — provider integration (wraps both Layout and Page):
+
+```tsx
+// pages/+Wrapper.tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+const queryClient = new QueryClient()
+
+export default function Wrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  )
+}
+```
+
+**Rule:** Use `+Wrapper` for tool integration (stores, providers). Use `+Layout` for visual structure (nav, sidebar, footer).
+
+### Rendering Modes (Per-Page)
+
+```tsx
+// pages/dashboard/+config.ts — SPA (no SSR)
+export default { ssr: false }
+
+// pages/blog/+config.ts — SSR (default)
+export default { ssr: true }
+
+// pages/docs/+config.ts — SSG (pre-rendered at build time)
+export default { prerender: true }
+```
+
+Mix rendering modes within a single app — SSR for public pages, SPA for dashboards.
+
+### Error Page
+
+```tsx
+// pages/_error/+Page.tsx
+import { usePageContext } from 'vike-react/usePageContext'
+
+export default function ErrorPage() {
+  const { is404, abortStatusCode, abortReason } = usePageContext()
+
+  if (is404) {
+    return (
+      <div role="alert">
+        <h1>404</h1>
+        <p>This page doesn't exist.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div role="alert">
+      <h1>{abortStatusCode ?? 500}</h1>
+      <p>{typeof abortReason === 'string' ? abortReason : 'Something went wrong.'}</p>
+    </div>
+  )
+}
+```
+
+### Head Tags and SEO
+
+```tsx
+// pages/users/@id/+data.ts — dynamic title from data
+import { useConfig } from 'vike-react/useConfig'
+
+export async function data(pageContext: PageContextServer) {
+  const config = useConfig()
+  const user = await db.user.findUnique({ where: { id: pageContext.routeParams.id } })
+
+  // Must call useConfig() before any await
+  config({ title: user.name, description: `Profile of ${user.name}` })
+
+  return { id: user.id, name: user.name, email: user.email }
+}
+```
+
+```tsx
+// pages/+Head.tsx — global head elements
+export function Head() {
+  return (
+    <>
+      <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+    </>
+  )
+}
+```
+
+### Client-Only Components
+
+For components that use browser APIs (`window`, `document`, canvas libraries):
+
+```tsx
+import { ClientOnly } from 'vike-react/ClientOnly'
+
+export default function Page() {
+  return (
+    <div>
+      <h1>Analytics</h1>
+      <ClientOnly fallback={<div className="h-64 animate-pulse bg-gray-200 rounded" />}>
+        <InteractiveChart />
+      </ClientOnly>
+    </div>
+  )
+}
+```
+
+### File Environment Conventions
+
+```
++data.ts              # Server-only (default for +data)
++data.client.ts       # Client-only
++data.shared.ts       # Both server and client
++guard.server.ts      # Server-only (explicit)
+credentials.server.ts # Never sent to client bundle (Vike enforces this)
+```
+
+Vike throws a build error if client code imports a `.server.ts` file — prevents accidental secret leakage.
+
+### Extending pageContext (TypeScript)
+
+```tsx
+// Type your custom pageContext properties globally
+declare global {
+  namespace Vike {
+    interface PageContext {
+      user?: {
+        id: string
+        name: string
+        isAdmin: boolean
+      }
+    }
+  }
+}
+export {}
+```
+
+```tsx
+// pages/+onCreatePageContext.server.ts — populate user from request
+export async function onCreatePageContext(pageContext) {
+  const token = pageContext.headers?.authorization?.replace('Bearer ', '')
+  if (token) {
+    pageContext.user = await verifyToken(token)
+  }
+}
+```
+
+### Vike + TanStack Query
+
+Use the `vike-react-query` extension or integrate manually via `+Wrapper`:
+
+```tsx
+// pages/+Wrapper.tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
+
+export default function Wrapper({ children }: { children: React.ReactNode }) {
+  // New QueryClient per request to prevent cross-request data leaks during SSR
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: { queries: { staleTime: 5 * 60 * 1000 } },
+  }))
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  )
+}
+```
+
+---
+
 ## Next.js App Router Patterns
 
-> **Skip this section** if you're using Vite + React Router. These patterns are specific to Next.js App Router.
+> **Skip this section** if you're not using Next.js. These patterns are specific to Next.js App Router.
 
 ### Server Components (Default)
 
