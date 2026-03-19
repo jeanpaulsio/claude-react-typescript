@@ -149,6 +149,15 @@ if (isUser(data)) { /* data is User here */ }
 - **Missing lazy loading on routes**: All route components eagerly imported — use `lazy()` + `Suspense` for code splitting
 - **Actions without validation**: Form mutations in `action` functions without Zod schema validation
 
+### HIGH — Vike (skip if not using Vike)
+- **Sensitive data in `+data()` return**: `+data()` return value is serialized to JSON and sent to client — don't return passwords, tokens, or internal IDs the client doesn't need
+- **Missing `+guard()` on protected pages**: Auth checks should use `+guard.server.ts`, not ad-hoc checks in `+data()` or components — guards run before data fetching
+- **`useConfig()` called after `await` in `+data()`**: Must call `useConfig()` before any `await` statement — it won't work after
+- **`.server.ts` import in client code**: Vike enforces this at build time, but watch for indirect imports through shared modules
+- **Missing error page**: No `pages/_error/+Page.tsx` — users see a blank page on errors
+- **Store created at module scope in `+Wrapper`**: Creates cross-request data leaks during SSR — create per-request with `useState(() => new Store())`
+- **Client-only APIs without `<ClientOnly>`**: Using `window`, `document`, or browser-only libraries in components rendered during SSR — wrap with `<ClientOnly>` or use `.client.ts`
+
 ### HIGH — Next.js App Router (skip if not using Next.js)
 - **`use client` missing**: Using hooks (useState, useEffect, useContext) or browser APIs in Server Components
 - **Server-only code in client**: Importing server-only modules (fs, db clients) in `'use client'` files
@@ -287,6 +296,7 @@ Verdict: [APPROVE / WARNING / BLOCK]
 
 ## Framework-Specific Checks
 
+- **Vike**: `+data()`/`+guard()` patterns, `.server.ts`/`.client.ts` boundaries, `+Wrapper` for providers, `+Layout` for visual structure, per-page rendering config, `<ClientOnly>` for browser APIs
 - **React Router**: Loader/action patterns, error boundaries per route, lazy routes, navigation guards
 - **TanStack Query**: Query key factories, stale time config, mutation invalidation, prefetching, proper error/loading handling
 - **Zod**: Schema-based validation at form and API boundaries, shared schemas between client and server

@@ -6,8 +6,8 @@ A Claude Code plugin for React/TypeScript code review and patterns. Provides a d
 
 | File | Type | Purpose |
 |------|------|---------|
-| `agents/react-typescript-reviewer.md` | Agent | Deep code review — React 19, hooks, components, composition, React Router, a11y, types, performance, test quality |
-| `skills/react-typescript-patterns/SKILL.md` | Skill | Reference patterns for React 19 hooks, components, composition, React Router, data fetching, forms, testing, error boundaries, accessibility, performance |
+| `agents/react-typescript-reviewer.md` | Agent | Deep code review — React 19, hooks, components, composition, Vike, React Router, a11y, types, performance, test quality |
+| `skills/react-typescript-patterns/SKILL.md` | Skill | Reference patterns for React 19 hooks, components, composition, Vike, React Router, data fetching, forms, testing, error boundaries, accessibility, performance |
 | `commands/react-review.md` | Command | `/react-review` slash command to trigger the reviewer |
 
 ## Install
@@ -30,7 +30,7 @@ In any Claude Code session inside a React/TypeScript project:
 The reviewer runs `tsc --noEmit` and `eslint`, then reviews your changed files for:
 
 - **CRITICAL**: XSS, secrets, hooks rule violations
-- **HIGH**: React 19 misuse, stale closures, missing deps, component anti-patterns, `any` types, a11y issues, React Router / Next.js mistakes
+- **HIGH**: React 19 misuse, stale closures, missing deps, component anti-patterns, `any` types, a11y issues, Vike / React Router / Next.js mistakes
 - **MEDIUM**: Performance (React Compiler awareness), state management, error handling, test quality
 - **LOW**: Code organization, naming, dead code, modernization opportunities
 
@@ -42,6 +42,7 @@ Defaults to **Vite + React Router**. Next.js patterns are in a dedicated section
 - **Hooks**: `useReducer` for complex state, `useEffect` cleanup, custom hooks, `useRef` patterns
 - **Composition**: Compound components, slots, render props, custom hooks
 - **Concurrent**: `useTransition`, `useDeferredValue`
+- **Vike**: `+data()`/`+guard()`, layouts vs wrappers, per-page rendering (SSR/SPA/SSG), `<ClientOnly>`, file env conventions, pageContext typing
 - **React Router**: Lazy routes, loaders, actions, per-route error boundaries
 - **Data fetching**: TanStack Query (queries, mutations, pagination), Suspense-based fetching, avoiding waterfalls
 - **Forms**: Native forms + `useActionState` + Zod (library-free by default)
