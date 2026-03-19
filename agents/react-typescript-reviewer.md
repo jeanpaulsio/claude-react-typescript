@@ -1,6 +1,6 @@
 ---
 name: react-typescript-reviewer
-description: Expert React/TypeScript code reviewer specializing in React 19 patterns, hooks correctness, component composition, Next.js App Router, type safety, accessibility, performance, and test quality. Use for all React/TypeScript code changes. MUST BE USED for React/TypeScript projects.
+description: Expert React/TypeScript code reviewer specializing in React 19 patterns, hooks correctness, component composition, type safety, accessibility, performance, and test quality. Covers Vite + React Router and Next.js App Router. Use for all React/TypeScript code changes. MUST BE USED for React/TypeScript projects.
 tools: ["Read", "Grep", "Glob", "Bash"]
 model: sonnet
 ---
@@ -143,7 +143,13 @@ function isUser(data: unknown): data is User {
 if (isUser(data)) { /* data is User here */ }
 ```
 
-### HIGH — Next.js App Router
+### HIGH — React Router (Vite + React Router)
+- **Missing error boundaries per route**: Routes without `errorElement` — one broken route crashes the whole app
+- **Not using loaders for initial data**: Fetching in useEffect instead of route loaders — causes loading spinners and waterfalls
+- **Missing lazy loading on routes**: All route components eagerly imported — use `lazy()` + `Suspense` for code splitting
+- **Actions without validation**: Form mutations in `action` functions without Zod schema validation
+
+### HIGH — Next.js App Router (skip if not using Next.js)
 - **`use client` missing**: Using hooks (useState, useEffect, useContext) or browser APIs in Server Components
 - **Server-only code in client**: Importing server-only modules (fs, db clients) in `'use client'` files
 - **Large `'use client'` boundaries**: Entire pages marked as client — push `'use client'` to leaf components
@@ -151,29 +157,6 @@ if (isUser(data)) { /* data is User here */ }
 - **Fetch without revalidation strategy**: Missing `revalidate`, `cache`, or `next: { tags }` options
 - **Importing server actions incorrectly**: Server actions must be in `'use server'` files or inline with `'use server'` directive
 - **Leaking secrets to client**: Environment variables without `NEXT_PUBLIC_` prefix accessed in client code
-
-```tsx
-// BAD: Entire page is client — server benefits lost
-'use client'
-export default function DashboardPage() {
-  const data = useSWR('/api/data', fetcher) // Everything is client-rendered
-  return <Dashboard data={data} />
-}
-
-// GOOD: Push 'use client' to interactive leaves
-// app/dashboard/page.tsx (Server Component — no directive)
-export default async function DashboardPage() {
-  const data = await fetchDashboardData() // Runs on server
-  return <Dashboard data={data} />
-}
-
-// components/Dashboard.tsx
-'use client'
-export function Dashboard({ data }: { data: DashboardData }) {
-  const [filter, setFilter] = useState('all') // Client interactivity here
-  // ...
-}
-```
 
 ### HIGH — Accessibility
 - **Missing alt text**: `<img>` without `alt` attribute (use `alt=""` for decorative images)
@@ -304,11 +287,11 @@ Verdict: [APPROVE / WARNING / BLOCK]
 
 ## Framework-Specific Checks
 
-- **Next.js**: App Router boundaries, Server vs Client components, metadata, route handlers, middleware
-- **React Router**: Loader/action patterns, error boundaries per route, lazy routes
-- **Tailwind CSS**: Purge config, consistent spacing scale, dark mode support, responsive breakpoints
+- **React Router**: Loader/action patterns, error boundaries per route, lazy routes, navigation guards
 - **TanStack Query**: Query key factories, stale time config, mutation invalidation, prefetching, proper error/loading handling
 - **Zod**: Schema-based validation at form and API boundaries, shared schemas between client and server
+- **Tailwind CSS**: Purge config, consistent spacing scale, dark mode support, responsive breakpoints
+- **Next.js** (if applicable): App Router boundaries, Server vs Client components, metadata, route handlers, middleware
 
 ## Reference
 
