@@ -1,12 +1,12 @@
 ---
 name: react-typescript-patterns
-description: Deep reference for React/TypeScript patterns — React 19 hooks, components, composition, Next.js App Router, type safety, testing, accessibility, data fetching, and performance optimization.
+description: Deep reference for React/TypeScript patterns — React 19 hooks, components, composition, type safety, testing, accessibility, data fetching, performance, and optional Next.js App Router patterns.
 origin: claude-react-typescript
 ---
 
 # React/TypeScript Patterns
 
-Production patterns for React applications with TypeScript. Covers React 19, component design, hooks, composition, Next.js App Router, type safety, testing, accessibility, data fetching, and performance.
+Production patterns for React applications with TypeScript. Covers React 19, component design, hooks, composition, type safety, testing, accessibility, data fetching, and performance. Defaults to **Vite + React** (client-side); Next.js patterns are in a [dedicated section](#nextjs-app-router-patterns).
 
 > To run an automated review using these patterns, use the **react-typescript-reviewer** agent or the `/react-review` command.
 
@@ -14,13 +14,14 @@ Production patterns for React applications with TypeScript. Covers React 19, com
 
 - Building or reviewing React components
 - Writing custom hooks
-- Working with Next.js App Router (Server Components, Client Components, Server Actions)
 - Fixing TypeScript type errors in React code
 - Optimizing React performance (re-renders, bundle size, lazy loading)
 - Writing tests for React components (React Testing Library, MSW, Vitest)
 - Implementing accessible UI patterns
 - Managing state (local, global, server)
 - Fetching and caching server data (TanStack Query, Suspense)
+- Working with React Router (loaders, lazy routes, error boundaries)
+- Working with Next.js App Router (Server Components, Server Actions) — [see section](#nextjs-app-router-patterns)
 
 ---
 
@@ -39,12 +40,35 @@ function UserProfile({ userPromise }: { userPromise: Promise<User> }) {
   return <h1>{user.name}</h1>
 }
 
-// Usage — create the promise OUTSIDE the component (parent or loader)
-function Page({ userId }: { userId: string }) {
-  const userPromise = fetchUser(userId) // Start fetch before render
+// IMPORTANT: Create the promise OUTSIDE the consuming component.
+// In client-side React, use a loader, cache, or lift to a parent that doesn't re-render.
+
+// Option 1: React Router loader (recommended for Vite + React Router)
+const userRoute = {
+  path: '/users/:id',
+  loader: ({ params }) => ({ userPromise: fetchUser(params.id!) }),
+  element: <UserPage />,
+}
+
+function UserPage() {
+  const { userPromise } = useLoaderData() as { userPromise: Promise<User> }
   return (
     <Suspense fallback={<Skeleton />}>
       <UserProfile userPromise={userPromise} />
+    </Suspense>
+  )
+}
+
+// Option 2: Stable promise via useRef (when no router loader available)
+function UserPage({ userId }: { userId: string }) {
+  const promiseRef = useRef<Promise<User> | null>(null)
+  if (!promiseRef.current) {
+    promiseRef.current = fetchUser(userId)
+  }
+
+  return (
+    <Suspense fallback={<Skeleton />}>
+      <UserProfile userPromise={promiseRef.current} />
     </Suspense>
   )
 }
@@ -57,7 +81,8 @@ function ThemeText({ override }: { override?: boolean }) {
 ```
 
 **Common mistakes:**
-- Creating the promise inside the consuming component (causes infinite Suspense loop)
+- Creating the promise inside the consuming component on every render (causes infinite Suspense loop in client components)
+- Creating the promise in a parent that re-renders (same issue — use ref, loader, or cache)
 - Forgetting the Suspense boundary (unhandled suspended component)
 - Not pairing with an Error Boundary (promise rejections need to be caught)
 
@@ -578,6 +603,85 @@ function useAsync<T>(asyncFn: () => Promise<T>, deps: unknown[]) {
 }
 ```
 
+### useReducer for Complex State
+
+Use `useReducer` when state has multiple related fields or transitions that depend on the current state:
+
+```tsx
+type TodoState = {
+  todos: Todo[]
+  filter: 'all' | 'active' | 'completed'
+  editingId: string | null
+}
+
+type TodoAction =
+  | { type: 'ADD'; text: string }
+  | { type: 'TOGGLE'; id: string }
+  | { type: 'DELETE'; id: string }
+  | { type: 'SET_FILTER'; filter: TodoState['filter'] }
+  | { type: 'START_EDIT'; id: string }
+  | { type: 'SAVE_EDIT'; id: string; text: string }
+  | { type: 'CANCEL_EDIT' }
+
+function todoReducer(state: TodoState, action: TodoAction): TodoState {
+  switch (action.type) {
+    case 'ADD':
+      return {
+        ...state,
+        todos: [...state.todos, { id: crypto.randomUUID(), text: action.text, completed: false }],
+      }
+    case 'TOGGLE':
+      return {
+        ...state,
+        todos: state.todos.map(t => t.id === action.id ? { ...t, completed: !t.completed } : t),
+      }
+    case 'DELETE':
+      return {
+        ...state,
+        todos: state.todos.filter(t => t.id !== action.id),
+        editingId: state.editingId === action.id ? null : state.editingId,
+      }
+    case 'SET_FILTER':
+      return { ...state, filter: action.filter }
+    case 'START_EDIT':
+      return { ...state, editingId: action.id }
+    case 'SAVE_EDIT':
+      return {
+        ...state,
+        todos: state.todos.map(t => t.id === action.id ? { ...t, text: action.text } : t),
+        editingId: null,
+      }
+    case 'CANCEL_EDIT':
+      return { ...state, editingId: null }
+  }
+}
+
+function TodoApp() {
+  const [state, dispatch] = useReducer(todoReducer, {
+    todos: [],
+    filter: 'all',
+    editingId: null,
+  })
+
+  const filtered = useMemo(() => {
+    switch (state.filter) {
+      case 'active': return state.todos.filter(t => !t.completed)
+      case 'completed': return state.todos.filter(t => t.completed)
+      default: return state.todos
+    }
+  }, [state.todos, state.filter])
+
+  // dispatch({ type: 'ADD', text: 'New todo' })
+  // dispatch({ type: 'TOGGLE', id: '123' })
+}
+```
+
+**When to use `useReducer` over `useState`:**
+- State has 3+ related fields that change together
+- Next state depends on previous state (toggle, increment, append)
+- Multiple actions modify the same state (add/edit/delete/filter)
+- You want testable state logic (reducer is a pure function)
+
 ### useRef Patterns
 
 ```tsx
@@ -674,7 +778,458 @@ function SearchResults({ query }: { query: string }) {
 
 ---
 
+## React Router Patterns
+
+### Route Configuration with Lazy Loading
+
+```tsx
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
+
+const Dashboard = lazy(() => import('./features/dashboard/DashboardPage'))
+const UserProfile = lazy(() => import('./features/users/UserProfilePage'))
+const Settings = lazy(() => import('./features/settings/SettingsPage'))
+
+const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <RootLayout />,
+    errorElement: <RootError />,
+    children: [
+      {
+        path: 'dashboard',
+        element: (
+          <Suspense fallback={<PageSkeleton />}>
+            <Dashboard />
+          </Suspense>
+        ),
+        loader: dashboardLoader,
+      },
+      {
+        path: 'users/:id',
+        element: (
+          <Suspense fallback={<PageSkeleton />}>
+            <UserProfile />
+          </Suspense>
+        ),
+        loader: userLoader,
+        errorElement: <UserError />,
+      },
+      {
+        path: 'settings',
+        element: (
+          <Suspense fallback={<PageSkeleton />}>
+            <Settings />
+          </Suspense>
+        ),
+      },
+    ],
+  },
+])
+
+function App() {
+  return <RouterProvider router={router} />
+}
+```
+
+### Loaders for Data Fetching
+
+Loaders run before the route renders — no loading spinners needed for initial data:
+
+```tsx
+import { useLoaderData, type LoaderFunctionArgs } from 'react-router-dom'
+
+// Loader runs before component renders
+export async function userLoader({ params }: LoaderFunctionArgs) {
+  const user = await api.getUser(params.id!)
+  if (!user) throw new Response('Not Found', { status: 404 })
+  return { user }
+}
+
+function UserProfilePage() {
+  const { user } = useLoaderData() as Awaited<ReturnType<typeof userLoader>>
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <p>{user.email}</p>
+    </div>
+  )
+}
+```
+
+### Error Boundaries per Route
+
+```tsx
+import { useRouteError, isRouteErrorResponse } from 'react-router-dom'
+
+function UserError() {
+  const error = useRouteError()
+
+  if (isRouteErrorResponse(error)) {
+    return (
+      <div role="alert">
+        <h2>{error.status === 404 ? 'User not found' : 'Something went wrong'}</h2>
+        <p>{error.statusText}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div role="alert">
+      <h2>Unexpected error</h2>
+      <p>{error instanceof Error ? error.message : 'Unknown error'}</p>
+    </div>
+  )
+}
+```
+
+### Actions for Mutations
+
+```tsx
+import { Form, useActionData, useNavigation, type ActionFunctionArgs } from 'react-router-dom'
+
+export async function updateProfileAction({ request, params }: ActionFunctionArgs) {
+  const formData = await request.formData()
+  const result = ProfileSchema.safeParse(Object.fromEntries(formData))
+
+  if (!result.success) {
+    return { errors: result.error.flatten().fieldErrors }
+  }
+
+  await api.updateUser(params.id!, result.data)
+  return { success: true }
+}
+
+function EditProfileForm() {
+  const actionData = useActionData() as { errors?: Record<string, string[]>; success?: boolean }
+  const navigation = useNavigation()
+  const isSubmitting = navigation.state === 'submitting'
+
+  return (
+    <Form method="post">
+      <label htmlFor="name">Name</label>
+      <input id="name" name="name" />
+      {actionData?.errors?.name && <span role="alert">{actionData.errors.name[0]}</span>}
+
+      <button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Saving...' : 'Save'}
+      </button>
+    </Form>
+  )
+}
+```
+
+---
+
+## Vike Patterns
+
+> [Vike](https://vike.dev) is a flexible Vite-based framework with per-page rendering control (SSR, SPA, SSG), filesystem routing, and a hook-based architecture. Use `vike-react` for React integration.
+
+### File Structure
+
+```
+pages/
+├── +config.ts                     # Global config (extends vike-react)
+├── +Layout.tsx                    # Root layout (wraps all pages)
+├── +Wrapper.tsx                   # Provider wrapper (store, query client)
+├── +Head.tsx                      # Global <head> tags (favicon, fonts)
+├── +onCreatePageContext.server.ts # Add user/auth to pageContext
+├── _error/
+│   └── +Page.tsx                  # Error page (404, 500, custom)
+├── index/
+│   ├── +Page.tsx                  # URL: /
+│   └── +data.ts                   # Data for home page
+├── (marketing)/                   # Route group (no URL segment)
+│   ├── +Layout.tsx                # Layout for marketing pages only
+│   ├── about/+Page.tsx            # URL: /about
+│   └── pricing/+Page.tsx          # URL: /pricing
+├── dashboard/
+│   ├── +guard.ts                  # Auth check (runs before +data)
+│   ├── +Page.tsx                  # URL: /dashboard
+│   └── +data.ts                   # Server-side data fetching
+└── users/
+    └── @id/                       # Parameterized route
+        ├── +Page.tsx              # URL: /users/123
+        └── +data.ts
+```
+
+**Key conventions:**
+- `pages/`, `index/`, `src/`, `(group)/` are ignored in URLs
+- `@param` for dynamic route segments (accessed via `pageContext.routeParams`)
+- `(group)` for organizing pages with shared config/layout without affecting URLs
+
+### Global Config
+
+```tsx
+// pages/+config.ts
+import vikeReact from 'vike-react/config'
+
+export default {
+  extends: [vikeReact],
+  title: 'My App',
+  description: 'Built with Vike + React',
+  ssr: true, // Default: SSR enabled. Set false for SPA pages.
+}
+```
+
+### Pages and Data Fetching
+
+`+data()` runs on the server by default — safe to use ORM, SQL, secrets:
+
+```tsx
+// pages/users/@id/+data.ts
+import { render } from 'vike/abort'
+import type { PageContextServer } from 'vike/types'
+
+export type Data = Awaited<ReturnType<typeof data>>
+
+export async function data(pageContext: PageContextServer) {
+  const user = await db.user.findUnique({ where: { id: pageContext.routeParams.id } })
+
+  if (!user) {
+    throw render(404, `User ${pageContext.routeParams.id} not found`)
+  }
+
+  // Only send what the client needs — minimize payload
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+  }
+}
+```
+
+```tsx
+// pages/users/@id/+Page.tsx
+import { useData } from 'vike-react/useData'
+import type { Data } from './+data'
+
+export default function Page() {
+  const { name, email } = useData<Data>()
+
+  return (
+    <div>
+      <h1>{name}</h1>
+      <p>{email}</p>
+    </div>
+  )
+}
+```
+
+### Route Guards (Auth Protection)
+
+`+guard()` runs before `+data()` — prevents unauthorized data fetching:
+
+```tsx
+// pages/dashboard/+guard.server.ts
+import { render, redirect } from 'vike/abort'
+import type { PageContextServer } from 'vike/types'
+
+export async function guard(pageContext: PageContextServer) {
+  if (!pageContext.user) {
+    throw redirect('/login')
+  }
+  if (!pageContext.user.isAdmin) {
+    throw render(403, 'Admin access required')
+  }
+}
+```
+
+### Layouts and Wrappers
+
+**`+Layout`** — visual page structure (cumulative, nests with parent layouts):
+
+```tsx
+// pages/+Layout.tsx
+export default function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <Navigation />
+      <main>{children}</main>
+      <Footer />
+    </>
+  )
+}
+```
+
+**`+Wrapper`** — provider integration (wraps both Layout and Page):
+
+```tsx
+// pages/+Wrapper.tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+const queryClient = new QueryClient()
+
+export default function Wrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  )
+}
+```
+
+**Rule:** Use `+Wrapper` for tool integration (stores, providers). Use `+Layout` for visual structure (nav, sidebar, footer).
+
+### Rendering Modes (Per-Page)
+
+```tsx
+// pages/dashboard/+config.ts — SPA (no SSR)
+export default { ssr: false }
+
+// pages/blog/+config.ts — SSR (default)
+export default { ssr: true }
+
+// pages/docs/+config.ts — SSG (pre-rendered at build time)
+export default { prerender: true }
+```
+
+Mix rendering modes within a single app — SSR for public pages, SPA for dashboards.
+
+### Error Page
+
+```tsx
+// pages/_error/+Page.tsx
+import { usePageContext } from 'vike-react/usePageContext'
+
+export default function ErrorPage() {
+  const { is404, abortStatusCode, abortReason } = usePageContext()
+
+  if (is404) {
+    return (
+      <div role="alert">
+        <h1>404</h1>
+        <p>This page doesn't exist.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div role="alert">
+      <h1>{abortStatusCode ?? 500}</h1>
+      <p>{typeof abortReason === 'string' ? abortReason : 'Something went wrong.'}</p>
+    </div>
+  )
+}
+```
+
+### Head Tags and SEO
+
+```tsx
+// pages/users/@id/+data.ts — dynamic title from data
+import { useConfig } from 'vike-react/useConfig'
+
+export async function data(pageContext: PageContextServer) {
+  const config = useConfig()
+  const user = await db.user.findUnique({ where: { id: pageContext.routeParams.id } })
+
+  // Must call useConfig() before any await
+  config({ title: user.name, description: `Profile of ${user.name}` })
+
+  return { id: user.id, name: user.name, email: user.email }
+}
+```
+
+```tsx
+// pages/+Head.tsx — global head elements
+export function Head() {
+  return (
+    <>
+      <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+    </>
+  )
+}
+```
+
+### Client-Only Components
+
+For components that use browser APIs (`window`, `document`, canvas libraries):
+
+```tsx
+import { ClientOnly } from 'vike-react/ClientOnly'
+
+export default function Page() {
+  return (
+    <div>
+      <h1>Analytics</h1>
+      <ClientOnly fallback={<div className="h-64 animate-pulse bg-gray-200 rounded" />}>
+        <InteractiveChart />
+      </ClientOnly>
+    </div>
+  )
+}
+```
+
+### File Environment Conventions
+
+```
++data.ts              # Server-only (default for +data)
++data.client.ts       # Client-only
++data.shared.ts       # Both server and client
++guard.server.ts      # Server-only (explicit)
+credentials.server.ts # Never sent to client bundle (Vike enforces this)
+```
+
+Vike throws a build error if client code imports a `.server.ts` file — prevents accidental secret leakage.
+
+### Extending pageContext (TypeScript)
+
+```tsx
+// Type your custom pageContext properties globally
+declare global {
+  namespace Vike {
+    interface PageContext {
+      user?: {
+        id: string
+        name: string
+        isAdmin: boolean
+      }
+    }
+  }
+}
+export {}
+```
+
+```tsx
+// pages/+onCreatePageContext.server.ts — populate user from request
+export async function onCreatePageContext(pageContext) {
+  const token = pageContext.headers?.authorization?.replace('Bearer ', '')
+  if (token) {
+    pageContext.user = await verifyToken(token)
+  }
+}
+```
+
+### Vike + TanStack Query
+
+Use the `vike-react-query` extension or integrate manually via `+Wrapper`:
+
+```tsx
+// pages/+Wrapper.tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useState } from 'react'
+
+export default function Wrapper({ children }: { children: React.ReactNode }) {
+  // New QueryClient per request to prevent cross-request data leaks during SSR
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: { queries: { staleTime: 5 * 60 * 1000 } },
+  }))
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  )
+}
+```
+
+---
+
 ## Next.js App Router Patterns
+
+> **Skip this section** if you're not using Next.js. These patterns are specific to Next.js App Router.
 
 ### Server Components (Default)
 
@@ -985,7 +1540,9 @@ function ContactForm() {
 function InlineValidationForm() {
   const [email, setEmail] = useState('')
   const [touched, setTouched] = useState(false)
-  const error = touched ? EmailSchema.safeParse(email).error?.message : null
+
+  const result = touched ? EmailSchema.safeParse(email) : null
+  const error = result && !result.success ? result.error.issues[0]?.message : null
 
   return (
     <div>
@@ -1088,16 +1645,65 @@ function useUpdateTodo() {
 }
 ```
 
+### Pagination with `useInfiniteQuery`
+
+```tsx
+import { useInfiniteQuery } from '@tanstack/react-query'
+
+interface PageResponse<T> {
+  data: T[]
+  nextCursor: string | null
+}
+
+function useUserList(filters: UserFilters) {
+  return useInfiniteQuery({
+    queryKey: userKeys.list(filters),
+    queryFn: ({ pageParam }) => api.getUsers({ ...filters, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage: PageResponse<User>) => lastPage.nextCursor ?? undefined,
+  })
+}
+
+function UserList({ filters }: { filters: UserFilters }) {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, error } = useUserList(filters)
+
+  if (isLoading) return <Skeleton />
+  if (error) return <ErrorMessage error={error} />
+
+  const users = data.pages.flatMap(page => page.data)
+
+  return (
+    <div>
+      <ul>
+        {users.map(user => <UserRow key={user.id} user={user} />)}
+      </ul>
+      {hasNextPage && (
+        <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+          {isFetchingNextPage ? 'Loading more...' : 'Load more'}
+        </button>
+      )}
+    </div>
+  )
+}
+```
+
 ### Suspense-Based Data Fetching with `use()`
 
 ```tsx
 import { use, Suspense } from 'react'
 import { ErrorBoundary } from 'react-error-boundary'
+import { useLoaderData, type LoaderFunctionArgs } from 'react-router-dom'
 
-// Start fetches in the parent — don't create promises in the consuming component
+// Start fetches in a loader — promises are stable across renders
+export function dashboardLoader() {
+  return {
+    revenuePromise: fetchRevenue(),
+    usersPromise: fetchActiveUsers(),
+  }
+}
+
 function DashboardPage() {
-  const revenuePromise = fetchRevenue()
-  const usersPromise = fetchActiveUsers()
+  const { revenuePromise, usersPromise } = useLoaderData() as ReturnType<typeof dashboardLoader>
 
   return (
     <div>
@@ -1134,11 +1740,18 @@ function Profile({ userId }: { userId: string }) {
   // ...
 }
 
-// GOOD: Parallel fetches — start all at once in the parent
-function ProfilePage({ userId }: { userId: string }) {
-  const userPromise = fetchUser(userId)
-  const postsPromise = fetchPosts(userId)
-  const followersPromise = fetchFollowers(userId)
+// GOOD: Parallel fetches via React Router loader
+export function profileLoader({ params }: LoaderFunctionArgs) {
+  // All three start simultaneously — no waterfall
+  return {
+    userPromise: fetchUser(params.id!),
+    postsPromise: fetchPosts(params.id!),
+    followersPromise: fetchFollowers(params.id!),
+  }
+}
+
+function ProfilePage() {
+  const { userPromise, postsPromise, followersPromise } = useLoaderData() as Awaited<ReturnType<typeof profileLoader>>
 
   return (
     <>
@@ -1363,7 +1976,8 @@ function renderWithProviders(ui: React.ReactElement, options?: Omit<RenderOption
   return render(ui, { wrapper: AllProviders, ...options })
 }
 
-export { renderWithProviders as render, screen, waitFor } from '@testing-library/react'
+export { renderWithProviders as render }
+export { screen, waitFor } from '@testing-library/react'
 ```
 
 ### Mocking API Calls with MSW
