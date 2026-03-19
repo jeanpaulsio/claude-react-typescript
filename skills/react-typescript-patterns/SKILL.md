@@ -1,12 +1,12 @@
 ---
 name: react-typescript-patterns
-description: Deep reference for React/TypeScript patterns — React 19 hooks, components, composition, Next.js App Router, type safety, testing, accessibility, data fetching, and performance optimization.
+description: Deep reference for React/TypeScript patterns — React 19 hooks, components, composition, type safety, testing, accessibility, data fetching, performance, and optional Next.js App Router patterns.
 origin: claude-react-typescript
 ---
 
 # React/TypeScript Patterns
 
-Production patterns for React applications with TypeScript. Covers React 19, component design, hooks, composition, Next.js App Router, type safety, testing, accessibility, data fetching, and performance.
+Production patterns for React applications with TypeScript. Covers React 19, component design, hooks, composition, type safety, testing, accessibility, data fetching, and performance. Defaults to **Vite + React** (client-side); Next.js patterns are in a [dedicated section](#nextjs-app-router-patterns).
 
 > To run an automated review using these patterns, use the **react-typescript-reviewer** agent or the `/react-review` command.
 
@@ -14,13 +14,14 @@ Production patterns for React applications with TypeScript. Covers React 19, com
 
 - Building or reviewing React components
 - Writing custom hooks
-- Working with Next.js App Router (Server Components, Client Components, Server Actions)
 - Fixing TypeScript type errors in React code
 - Optimizing React performance (re-renders, bundle size, lazy loading)
 - Writing tests for React components (React Testing Library, MSW, Vitest)
 - Implementing accessible UI patterns
 - Managing state (local, global, server)
 - Fetching and caching server data (TanStack Query, Suspense)
+- Working with React Router (loaders, lazy routes, error boundaries)
+- Working with Next.js App Router (Server Components, Server Actions) — [see section](#nextjs-app-router-patterns)
 
 ---
 
@@ -39,12 +40,35 @@ function UserProfile({ userPromise }: { userPromise: Promise<User> }) {
   return <h1>{user.name}</h1>
 }
 
-// Usage — create the promise OUTSIDE the component (parent or loader)
-function Page({ userId }: { userId: string }) {
-  const userPromise = fetchUser(userId) // Start fetch before render
+// IMPORTANT: Create the promise OUTSIDE the consuming component.
+// In client-side React, use a loader, cache, or lift to a parent that doesn't re-render.
+
+// Option 1: React Router loader (recommended for Vite + React Router)
+const userRoute = {
+  path: '/users/:id',
+  loader: ({ params }) => ({ userPromise: fetchUser(params.id!) }),
+  element: <UserPage />,
+}
+
+function UserPage() {
+  const { userPromise } = useLoaderData() as { userPromise: Promise<User> }
   return (
     <Suspense fallback={<Skeleton />}>
       <UserProfile userPromise={userPromise} />
+    </Suspense>
+  )
+}
+
+// Option 2: Stable promise via useRef (when no router loader available)
+function UserPage({ userId }: { userId: string }) {
+  const promiseRef = useRef<Promise<User> | null>(null)
+  if (!promiseRef.current) {
+    promiseRef.current = fetchUser(userId)
+  }
+
+  return (
+    <Suspense fallback={<Skeleton />}>
+      <UserProfile userPromise={promiseRef.current} />
     </Suspense>
   )
 }
@@ -57,7 +81,8 @@ function ThemeText({ override }: { override?: boolean }) {
 ```
 
 **Common mistakes:**
-- Creating the promise inside the consuming component (causes infinite Suspense loop)
+- Creating the promise inside the consuming component on every render (causes infinite Suspense loop in client components)
+- Creating the promise in a parent that re-renders (same issue — use ref, loader, or cache)
 - Forgetting the Suspense boundary (unhandled suspended component)
 - Not pairing with an Error Boundary (promise rejections need to be caught)
 
@@ -578,6 +603,85 @@ function useAsync<T>(asyncFn: () => Promise<T>, deps: unknown[]) {
 }
 ```
 
+### useReducer for Complex State
+
+Use `useReducer` when state has multiple related fields or transitions that depend on the current state:
+
+```tsx
+type TodoState = {
+  todos: Todo[]
+  filter: 'all' | 'active' | 'completed'
+  editingId: string | null
+}
+
+type TodoAction =
+  | { type: 'ADD'; text: string }
+  | { type: 'TOGGLE'; id: string }
+  | { type: 'DELETE'; id: string }
+  | { type: 'SET_FILTER'; filter: TodoState['filter'] }
+  | { type: 'START_EDIT'; id: string }
+  | { type: 'SAVE_EDIT'; id: string; text: string }
+  | { type: 'CANCEL_EDIT' }
+
+function todoReducer(state: TodoState, action: TodoAction): TodoState {
+  switch (action.type) {
+    case 'ADD':
+      return {
+        ...state,
+        todos: [...state.todos, { id: crypto.randomUUID(), text: action.text, completed: false }],
+      }
+    case 'TOGGLE':
+      return {
+        ...state,
+        todos: state.todos.map(t => t.id === action.id ? { ...t, completed: !t.completed } : t),
+      }
+    case 'DELETE':
+      return {
+        ...state,
+        todos: state.todos.filter(t => t.id !== action.id),
+        editingId: state.editingId === action.id ? null : state.editingId,
+      }
+    case 'SET_FILTER':
+      return { ...state, filter: action.filter }
+    case 'START_EDIT':
+      return { ...state, editingId: action.id }
+    case 'SAVE_EDIT':
+      return {
+        ...state,
+        todos: state.todos.map(t => t.id === action.id ? { ...t, text: action.text } : t),
+        editingId: null,
+      }
+    case 'CANCEL_EDIT':
+      return { ...state, editingId: null }
+  }
+}
+
+function TodoApp() {
+  const [state, dispatch] = useReducer(todoReducer, {
+    todos: [],
+    filter: 'all',
+    editingId: null,
+  })
+
+  const filtered = useMemo(() => {
+    switch (state.filter) {
+      case 'active': return state.todos.filter(t => !t.completed)
+      case 'completed': return state.todos.filter(t => t.completed)
+      default: return state.todos
+    }
+  }, [state.todos, state.filter])
+
+  // dispatch({ type: 'ADD', text: 'New todo' })
+  // dispatch({ type: 'TOGGLE', id: '123' })
+}
+```
+
+**When to use `useReducer` over `useState`:**
+- State has 3+ related fields that change together
+- Next state depends on previous state (toggle, increment, append)
+- Multiple actions modify the same state (add/edit/delete/filter)
+- You want testable state logic (reducer is a pure function)
+
 ### useRef Patterns
 
 ```tsx
@@ -674,7 +778,153 @@ function SearchResults({ query }: { query: string }) {
 
 ---
 
+## React Router Patterns
+
+### Route Configuration with Lazy Loading
+
+```tsx
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { lazy, Suspense } from 'react'
+
+const Dashboard = lazy(() => import('./features/dashboard/DashboardPage'))
+const UserProfile = lazy(() => import('./features/users/UserProfilePage'))
+const Settings = lazy(() => import('./features/settings/SettingsPage'))
+
+const router = createBrowserRouter([
+  {
+    path: '/',
+    element: <RootLayout />,
+    errorElement: <RootError />,
+    children: [
+      {
+        path: 'dashboard',
+        element: (
+          <Suspense fallback={<PageSkeleton />}>
+            <Dashboard />
+          </Suspense>
+        ),
+        loader: dashboardLoader,
+      },
+      {
+        path: 'users/:id',
+        element: (
+          <Suspense fallback={<PageSkeleton />}>
+            <UserProfile />
+          </Suspense>
+        ),
+        loader: userLoader,
+        errorElement: <UserError />,
+      },
+      {
+        path: 'settings',
+        element: (
+          <Suspense fallback={<PageSkeleton />}>
+            <Settings />
+          </Suspense>
+        ),
+      },
+    ],
+  },
+])
+
+function App() {
+  return <RouterProvider router={router} />
+}
+```
+
+### Loaders for Data Fetching
+
+Loaders run before the route renders — no loading spinners needed for initial data:
+
+```tsx
+import { useLoaderData, type LoaderFunctionArgs } from 'react-router-dom'
+
+// Loader runs before component renders
+export async function userLoader({ params }: LoaderFunctionArgs) {
+  const user = await api.getUser(params.id!)
+  if (!user) throw new Response('Not Found', { status: 404 })
+  return { user }
+}
+
+function UserProfilePage() {
+  const { user } = useLoaderData() as Awaited<ReturnType<typeof userLoader>>
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <p>{user.email}</p>
+    </div>
+  )
+}
+```
+
+### Error Boundaries per Route
+
+```tsx
+import { useRouteError, isRouteErrorResponse } from 'react-router-dom'
+
+function UserError() {
+  const error = useRouteError()
+
+  if (isRouteErrorResponse(error)) {
+    return (
+      <div role="alert">
+        <h2>{error.status === 404 ? 'User not found' : 'Something went wrong'}</h2>
+        <p>{error.statusText}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div role="alert">
+      <h2>Unexpected error</h2>
+      <p>{error instanceof Error ? error.message : 'Unknown error'}</p>
+    </div>
+  )
+}
+```
+
+### Actions for Mutations
+
+```tsx
+import { Form, useActionData, useNavigation, type ActionFunctionArgs } from 'react-router-dom'
+
+export async function updateProfileAction({ request, params }: ActionFunctionArgs) {
+  const formData = await request.formData()
+  const result = ProfileSchema.safeParse(Object.fromEntries(formData))
+
+  if (!result.success) {
+    return { errors: result.error.flatten().fieldErrors }
+  }
+
+  await api.updateUser(params.id!, result.data)
+  return { success: true }
+}
+
+function EditProfileForm() {
+  const actionData = useActionData() as { errors?: Record<string, string[]>; success?: boolean }
+  const navigation = useNavigation()
+  const isSubmitting = navigation.state === 'submitting'
+
+  return (
+    <Form method="post">
+      <label htmlFor="name">Name</label>
+      <input id="name" name="name" />
+      {actionData?.errors?.name && <span role="alert">{actionData.errors.name[0]}</span>}
+
+      <button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Saving...' : 'Save'}
+      </button>
+    </Form>
+  )
+}
+```
+
+---
+
 ## Next.js App Router Patterns
+
+> **Skip this section** if you're using Vite + React Router. These patterns are specific to Next.js App Router.
 
 ### Server Components (Default)
 
@@ -985,7 +1235,9 @@ function ContactForm() {
 function InlineValidationForm() {
   const [email, setEmail] = useState('')
   const [touched, setTouched] = useState(false)
-  const error = touched ? EmailSchema.safeParse(email).error?.message : null
+
+  const result = touched ? EmailSchema.safeParse(email) : null
+  const error = result && !result.success ? result.error.issues[0]?.message : null
 
   return (
     <div>
@@ -1088,16 +1340,65 @@ function useUpdateTodo() {
 }
 ```
 
+### Pagination with `useInfiniteQuery`
+
+```tsx
+import { useInfiniteQuery } from '@tanstack/react-query'
+
+interface PageResponse<T> {
+  data: T[]
+  nextCursor: string | null
+}
+
+function useUserList(filters: UserFilters) {
+  return useInfiniteQuery({
+    queryKey: userKeys.list(filters),
+    queryFn: ({ pageParam }) => api.getUsers({ ...filters, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage: PageResponse<User>) => lastPage.nextCursor ?? undefined,
+  })
+}
+
+function UserList({ filters }: { filters: UserFilters }) {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, error } = useUserList(filters)
+
+  if (isLoading) return <Skeleton />
+  if (error) return <ErrorMessage error={error} />
+
+  const users = data.pages.flatMap(page => page.data)
+
+  return (
+    <div>
+      <ul>
+        {users.map(user => <UserRow key={user.id} user={user} />)}
+      </ul>
+      {hasNextPage && (
+        <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+          {isFetchingNextPage ? 'Loading more...' : 'Load more'}
+        </button>
+      )}
+    </div>
+  )
+}
+```
+
 ### Suspense-Based Data Fetching with `use()`
 
 ```tsx
 import { use, Suspense } from 'react'
 import { ErrorBoundary } from 'react-error-boundary'
+import { useLoaderData, type LoaderFunctionArgs } from 'react-router-dom'
 
-// Start fetches in the parent — don't create promises in the consuming component
+// Start fetches in a loader — promises are stable across renders
+export function dashboardLoader() {
+  return {
+    revenuePromise: fetchRevenue(),
+    usersPromise: fetchActiveUsers(),
+  }
+}
+
 function DashboardPage() {
-  const revenuePromise = fetchRevenue()
-  const usersPromise = fetchActiveUsers()
+  const { revenuePromise, usersPromise } = useLoaderData() as ReturnType<typeof dashboardLoader>
 
   return (
     <div>
@@ -1134,11 +1435,18 @@ function Profile({ userId }: { userId: string }) {
   // ...
 }
 
-// GOOD: Parallel fetches — start all at once in the parent
-function ProfilePage({ userId }: { userId: string }) {
-  const userPromise = fetchUser(userId)
-  const postsPromise = fetchPosts(userId)
-  const followersPromise = fetchFollowers(userId)
+// GOOD: Parallel fetches via React Router loader
+export function profileLoader({ params }: LoaderFunctionArgs) {
+  // All three start simultaneously — no waterfall
+  return {
+    userPromise: fetchUser(params.id!),
+    postsPromise: fetchPosts(params.id!),
+    followersPromise: fetchFollowers(params.id!),
+  }
+}
+
+function ProfilePage() {
+  const { userPromise, postsPromise, followersPromise } = useLoaderData() as Awaited<ReturnType<typeof profileLoader>>
 
   return (
     <>
@@ -1363,7 +1671,8 @@ function renderWithProviders(ui: React.ReactElement, options?: Omit<RenderOption
   return render(ui, { wrapper: AllProviders, ...options })
 }
 
-export { renderWithProviders as render, screen, waitFor } from '@testing-library/react'
+export { renderWithProviders as render }
+export { screen, waitFor } from '@testing-library/react'
 ```
 
 ### Mocking API Calls with MSW
